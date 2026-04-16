@@ -347,7 +347,16 @@ static void __exit monitor_exit(void)
      *   - remove and free every list node safely
      *   - leave no leaked state on module unload
      * ============================================================== */
+struct container_entry *entry, *tmp;
 
+mutex_lock(&container_lock);
+
+list_for_each_entry_safe(entry, tmp, &container_list, list) {
+    list_del(&entry->list);
+    kfree(entry);
+}
+
+mutex_unlock(&container_lock);
     cdev_del(&c_dev);
     device_destroy(cl, dev_num);
     class_destroy(cl);
