@@ -460,13 +460,12 @@ static int cmd_start(int argc, char *argv[])
     strncpy(req.command, argv[4], sizeof(req.command) - 1);
     req.soft_limit_bytes = DEFAULT_SOFT_LIMIT;
     req.hard_limit_bytes = DEFAULT_HARD_LIMIT;
-
     if (parse_optional_flags(&req, argc, argv, 5) != 0)
         return 1;
 
-    return send_control_request(&req);
-}
+    return send_control_request(&req);   // ✅ THIS WAS MISSING
 
+}
 static int cmd_run(int argc, char *argv[])
 {
     control_request_t req;
@@ -483,11 +482,48 @@ static int cmd_run(int argc, char *argv[])
     strncpy(req.container_id, argv[2], sizeof(req.container_id) - 1);
     strncpy(req.rootfs, argv[3], sizeof(req.rootfs) - 1);
     strncpy(req.command, argv[4], sizeof(req.command) - 1);
+
     req.soft_limit_bytes = DEFAULT_SOFT_LIMIT;
     req.hard_limit_bytes = DEFAULT_HARD_LIMIT;
 
     if (parse_optional_flags(&req, argc, argv, 5) != 0)
         return 1;
+
+    // 🔥 fork process
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        perror("fork failed");
+        return 1;
+    }
+
+    if (pid == 0) {
+        execvp(argv[4], &argv[4]);
+        perror("exec failed");
+        exit(1);
+    }
+
+    // 🔥 register with kernel
+    int fd = open("/dev/container_monitor", O_RDWR);
+    if (fd < 0) {
+        perror("open failed");
+        return 1;
+    }
+
+    struct monitor_request mreq;
+
+    mreq.pid = pid;
+    mreq.soft_limit_bytes = req.soft_limit_bytes;
+    mreq.hard_limit_bytes = req.hard_limit_bytes;
+
+    strncpy(mreq.container_id, req.container_id, MONITOR_NAME_LEN - 1);
+    mreq.container_id[MONITOR_NAME_LEN - 1] = '\0';
+
+    if (ioctl(fd, MONITOR_REGISTER, &mreq) < 0) {
+        perror("ioctl failed");
+    }
+
+    close(fd);
 
     return send_control_request(&req);
 }
@@ -559,15 +595,7 @@ int main(int argc, char *argv[])
 
     struct monitor_request req;
 
-    pid_t pid = fork();
 
-if (pid == 0) {
-    execl("./memory_hog", "memory_hog", NULL);
-    perror("exec failed");
-    exit(1);
-}
-
-req.pid = pid;
     req.soft_limit_bytes = 10 * 1024 * 1024;   // 10MB
 req.hard_limit_bytes = 20 * 1024 * 1024;   // 20MB
 
