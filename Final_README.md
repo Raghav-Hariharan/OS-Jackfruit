@@ -1,44 +1,86 @@
-# OS Jackfruit – Container Memory Monitor
-
-## Overview
-This project implements a **Linux kernel module** and a **user-space runtime (engine)** to monitor and control memory usage of container-like processes.
-
-The system tracks processes, enforces memory limits, and takes action when limits are exceeded.
+# Container Memory Monitor (OS Jackfruit)
 
 ---
 
-## Architecture
+## 1. Overview
 
-### User Space (engine)
-- Handles CLI commands (`run`, `start`, `ps`, etc.)
-- Spawns container processes using `fork + exec`
-- Communicates with kernel module using `ioctl`
+This project implements a lightweight container runtime in C along with a Linux kernel module to monitor and control memory usage.
 
-### Kernel Space (monitor module)
-- Tracks registered processes
-- Periodically checks memory usage (RSS)
-- Enforces limits
+- User-space runtime (engine.c) launches and manages containers
+- Kernel module (monitor.c) tracks memory usage
+- Enforces soft and hard memory limits
 
 ---
 
-## Features
+## 2. Features
 
-- Register/unregister containers
-- Track memory usage using RSS
+- Run containerized workloads
+- Track memory usage (RSS)
 - Soft limit warning (logged once)
-- Hard limit enforcement (process killed)
-- Safe concurrent access using mutex
+- Hard limit enforcement (SIGKILL)
+- Safe kernel linked-list management
 - Periodic monitoring using kernel timer
 
 ---
 
-## Data Structures
+## 3. Build and Run
 
-```c
-struct container_entry {
-    pid_t pid;
-    char container_id[MONITOR_NAME_LEN];
-    unsigned long soft_limit;
-    unsigned long hard_limit;
-    struct list_head list;
-};
+### Build
+
+cd boilerplate
+make
+
+### Load Kernel Module
+
+sudo insmod monitor.ko
+ls /dev | grep container_monitor
+
+---
+
+## 4. Running a Container
+
+sudo ./engine run test rootfs-alpha ./memory_hog
+
+---
+
+## 5. Demo (Screenshots)
+
+Build and Module Load → Screenshots/build.png  
+Running Workload → Screenshots/run.png  
+Soft Limit Trigger → Screenshots/soft_limit.png  
+Hard Limit Enforcement → Screenshots/hard_limit.png  
+Module Unload → Screenshots/unload.png  
+
+---
+
+## 6. How It Works
+
+1. Engine launches process using fork + exec
+2. Registers PID with kernel using ioctl
+3. Kernel tracks memory using RSS
+4. Timer checks periodically:
+   - Soft limit → warning
+   - Hard limit → kill
+
+---
+
+## 7. Design Decisions
+
+- Mutex used for safe access
+- Linked list for tracking containers
+- Kernel enforcement for reliability
+
+---
+
+## 8. Files
+
+engine.c → runtime  
+monitor.c → kernel module  
+monitor_ioctl.h → ioctl interface  
+memory_hog.c → test workload  
+
+---
+
+## 9. Cleanup
+
+sudo rmmod monitor
