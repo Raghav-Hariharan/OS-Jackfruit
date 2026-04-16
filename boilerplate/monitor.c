@@ -263,7 +263,33 @@ printk(KERN_INFO "[container_monitor] Added container=%s pid=%d\n",
      *   - return status indicating whether a matching entry was removed
      * ============================================================== */
 
-    return -ENOENT;
+struct container_entry *entry, *tmp;
+int found = 0;
+
+mutex_lock(&container_lock);
+
+list_for_each_entry_safe(entry, tmp, &container_list, list) {
+
+    if (entry->pid == req.pid &&
+        strncmp(entry->container_id, req.container_id, MONITOR_NAME_LEN) == 0) {
+
+        list_del(&entry->list);
+        kfree(entry);
+        found = 1;
+
+        printk(KERN_INFO "[container_monitor] Removed container=%s pid=%d\n",
+               req.container_id, req.pid);
+
+        break;
+    }
+}
+
+mutex_unlock(&container_lock);
+
+if (found)
+    return 0;
+
+return -ENOENT;
 }
 
 /* --- Provided: file operations --- */
