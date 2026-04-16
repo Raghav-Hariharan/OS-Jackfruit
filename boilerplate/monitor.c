@@ -39,8 +39,18 @@
  *   - remember whether the soft-limit warning was already emitted
  *   - include `struct list_head` linkage
  * ============================================================== */
+struct container_entry {
+    pid_t pid;
+    char container_id[MONITOR_NAME_LEN];
+    unsigned long soft_limit;
+    unsigned long hard_limit;
 
+    int soft_limit_triggered;   // 🔥 IMPORTANT
 
+    struct list_head list;
+};
+static LIST_HEAD(container_list);
+static DEFINE_MUTEX(container_lock);
 /* ==============================================================
  * TODO 2: Declare the global monitored list and a lock.
  *
@@ -143,7 +153,44 @@ static void timer_callback(struct timer_list *t)
      *   - enforce hard limit and then remove the entry
      *   - avoid use-after-free while deleting during iteration
      * ============================================================== */
+struct container_entry *entry, *tmp;
 
+mutex_lock(&container_lock);
+
+list_for_each_entry_safe(entry, tmp, &container_list, list) {
+
+    long rss = get_rss_bytes(entry->pid);
+
+    // 🔴 Process no longer exists
+    if (rss < 0) {
+        list_del(&entry->list);
+        kfree(entry);
+        continue;
+    }
+
+    // 🟡 Soft limit
+    if (rss > entry->soft_limit && !entry->soft_limit_triggered) {
+        log_soft_limit_event(entry->container_id,
+                             entry->pid,
+                             entry->soft_limit,
+                             rss);
+        entry->soft_limit_triggered = 1;
+    }
+
+    // 🔴 Hard limit
+    if (rss > entry->hard_limit) {
+        kill_process(entry->container_id,
+                     entry->pid,
+                     entry->hard_limit,
+                     rss);
+
+        list_del(&entry->list);
+        kfree(entry);
+        continue;
+    }
+}
+
+mutex_unlock(&container_lock);
     mod_timer(&monitor_timer, jiffies + CHECK_INTERVAL_SEC * HZ);
 }
 
@@ -179,7 +226,27 @@ static long monitor_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
          *   - validate allocation and limits
          *   - insert into the shared list under the chosen lock
          * ============================================================== */
+struct container_entry *entry;
 
+entry = kmalloc(sizeof(*entry), GFP_KERNEL);
+if (!entry)
+    return -ENOMEM;
+
+entry->pid = req.pid;
+entry->soft_limit = req.soft_limit_bytes;
+entry->hard_limit = req.hard_limit_bytes;
+entry->soft_limit_triggered = 0;
+
+strncpy(entry->container_id, req.container_id, MONITOR_NAME_LEN);
+
+INIT_LIST_HEAD(&entry->list);   // 🔥 ADD THIS
+
+mutex_lock(&container_lock);
+list_add(&entry->list, &container_list);
+mutex_unlock(&container_lock);
+
+printk(KERN_INFO "[container_monitor] Added container=%s pid=%d\n",
+       entry->container_id, entry->pid);
         return 0;
     }
 
@@ -191,7 +258,7 @@ static long monitor_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
      * TODO 5: Remove a monitored entry on explicit unregister.
      *
      * Requirements:
-     *   - search by PID, container ID, or both
+     *   - search by PID, container ID, 	or both
      *   - remove the matching entry safely if found
      *   - return status indicating whether a matching entry was removed
      * ============================================================== */

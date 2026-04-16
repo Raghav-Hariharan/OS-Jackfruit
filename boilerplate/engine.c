@@ -544,14 +544,42 @@ static int cmd_stop(int argc, char *argv[])
 
     return send_control_request(&req);
 }
-
 int main(int argc, char *argv[])
 {
     if (argc < 2) {
-        usage(argv[0]);
+    printf("Running test mode...\n");
+}
+
+    // 🔥 TEMP TEST: register container
+    int fd = open("/dev/container_monitor", O_RDWR);
+    if (fd < 0) {
+        perror("open failed");
         return 1;
     }
 
+    struct monitor_request req;
+
+    pid_t pid = fork();
+
+if (pid == 0) {
+    execl("./memory_hog", "memory_hog", NULL);
+    perror("exec failed");
+    exit(1);
+}
+
+req.pid = pid;
+    req.soft_limit_bytes = 10 * 1024 * 1024;   // 10MB
+req.hard_limit_bytes = 20 * 1024 * 1024;   // 20MB
+
+    snprintf(req.container_id, MONITOR_NAME_LEN, "test_container");
+
+    if (ioctl(fd, MONITOR_REGISTER, &req) < 0) {
+        perror("ioctl register failed");
+    }
+
+    close(fd);
+
+    // 🔽 existing logic
     if (strcmp(argv[1], "supervisor") == 0) {
         if (argc < 3) {
             fprintf(stderr, "Usage: %s supervisor <base-rootfs>\n", argv[0]);
